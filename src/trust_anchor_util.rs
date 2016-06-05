@@ -16,8 +16,19 @@
 
 use std;
 use super::{Error, TrustAnchor};
-use super::cert::{EndEntityOrCA, parse_cert};
+use super::cert::{EndEntityOrCA, Cert, parse_cert};
+use super::cert::certificate_serial_number;
+use super::der;
 use untrusted;
+
+fn trust_anchor_from_cert<'a>(cert: Cert<'a>) -> TrustAnchor<'a> {
+    TrustAnchor {
+        subject: cert.subject.as_slice_less_safe(),
+        spki: cert.spki.as_slice_less_safe(),
+        name_constraints: cert.name_constraints
+                              .map(|nc| nc.as_slice_less_safe())
+    }
+}
 
 /// Interprets the given DER-encoded certificate as a `TrustAnchor`. The
 /// certificate is not validated. In particular, there is no check that the
@@ -26,15 +37,12 @@ use untrusted;
 pub fn cert_der_as_trust_anchor<'a>(cert_der: untrusted::Input<'a>)
                                     -> Result<TrustAnchor<'a>, Error> {
     // XXX: `EndEntityOrCA::EndEntity` is used instead of `EndEntityOrCA::CA`
-    // because we don't have a refernce to a child cert, which is needed for
+    // because we don't have a reference to a child cert, which is needed for
     // `EndEntityOrCA::CA`. For this purpose, it doesn't matter.
-    let cert = try!(parse_cert(cert_der, EndEntityOrCA::EndEntity));
-    Ok(TrustAnchor {
-        subject: cert.subject.as_slice_less_safe(),
-        spki: cert.spki.as_slice_less_safe(),
-        name_constraints: cert.name_constraints
-                              .map(|nc| nc.as_slice_less_safe())
-    })
+    parse_cert(cert_der, EndEntityOrCA::EndEntity)
+        .map(trust_anchor_from_cert)
+        .or_else(|err| parse_cert_v1(cert_der)
+                 .or(Err(err)))
 }
 
 /// Generates code for hard-coding the given trust anchors into a program. This
@@ -51,4 +59,56 @@ pub fn generate_code_for_trust_anchors(name: &str,
     let value = str::replace(&format!("{:?};\n", trust_anchors), ": [", ": &[");
 
     decl + &value
+}
+
+/// Parses a v1 certificate directly into a TrustAnchor.
+fn parse_cert_v1<'a>(cert_der: untrusted::Input<'a>)
+                     -> Result<TrustAnchor<'a>, Error> {
+    /* The top level is a:
+     *
+     * Certificate ::= SEQUENCE {
+     *   certificateInfo CertificateInfo,
+     *   signatureAlgorithm AlgorithmIdentifier,
+     *   signature BIT STRING }
+     *
+     * CertificateInfo ::= SEQUENCE {
+     *   version [0] Version DEFAULT v1988,
+     *   serialNumber CertificateSerialNumber,
+     *   signature AlgorithmIdentifier,
+     *   issuer Name,
+     *   validity Validity,
+     *   subject Name,
+     *   subjectPublicKeyInfo SubjectPublicKeyInfo }
+     */
+
+    cert_der.read_all(Error::BadDER, |cert_der| {
+        der::nested(cert_der, der::Tag::Sequence, Error::BadDER,
+                    |cert_inf| {
+            let anchor = der::nested(cert_inf, der::Tag::Sequence, Error::BadDER,
+                        |inf| {
+                // version number should not appear in v1
+                try!(certificate_serial_number(inf));
+                try!(der::expect_tag_and_get_input(inf, der::Tag::Sequence)); // sigalg
+                try!(der::expect_tag_and_get_input(inf, der::Tag::Sequence)); // issuer
+                try!(der::expect_tag_and_get_input(inf, der::Tag::Sequence)); // validity
+                let subject =
+                    try!(der::expect_tag_and_get_input(inf, der::Tag::Sequence));
+                let spki =
+                    try!(der::expect_tag_and_get_input(inf, der::Tag::Sequence));
+
+                let anchor: TrustAnchor<'a> = TrustAnchor {
+                    subject: subject.as_slice_less_safe(),
+                    spki: spki.as_slice_less_safe(),
+                    name_constraints: None
+                };
+
+                Ok(anchor)
+            });
+
+            // read and discard signatureAlgorithm + signature
+            try!(der::expect_tag_and_get_input(cert_inf, der::Tag::Sequence));
+            try!(der::expect_tag_and_get_input(cert_inf, der::Tag::BitString));
+            anchor
+        })
+    })
 }
