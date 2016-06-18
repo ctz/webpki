@@ -134,7 +134,7 @@ pub fn certificate_serial_number<'a>(input: &mut untrusted::Reader<'a>)
     // * Conforming CAs MUST NOT use serialNumber values longer than 20 octets."
     // * "The serial number MUST be a positive integer [...]"
 
-    let value = try!(der::positive_integer(input));
+    let value = try!(der::expect_tag_and_get_input(input, der::Tag::Integer));
     if value.len() > 20 {
         return Err(Error::BadDER);
     }
