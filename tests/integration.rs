@@ -58,3 +58,19 @@ pub fn netflix()
                    time::get_time())
         .unwrap();
 }
+
+#[test]
+fn read_root_with_zero_serial() {
+    let ca = include_bytes!("misc/serial_zero.der");
+    trust_anchor_util::cert_der_as_trust_anchor(
+        Input::from(ca)
+    ).unwrap();
+}
+
+#[test]
+fn read_root_with_neg_serial() {
+    let ca = include_bytes!("misc/serial_neg.der");
+    trust_anchor_util::cert_der_as_trust_anchor(
+        Input::from(ca)
+    ).unwrap();
+}
