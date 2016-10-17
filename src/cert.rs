@@ -14,6 +14,7 @@
 
 use {Error, der, signed_data};
 use untrusted;
+use time;
 
 pub enum EndEntityOrCA<'a> {
     EndEntity,
@@ -148,6 +149,23 @@ pub fn certificate_serial_number<'a>(input: &mut untrusted::Reader<'a>)
         return Err(Error::BadDER);
     }
     Ok(())
+}
+
+pub struct Validity {
+    pub not_before: time::Timespec,
+    pub not_after: time::Timespec
+}
+
+pub fn parse_validity(validity: &untrusted::Input)
+                  -> Result<Validity, Error> {
+    validity.read_all(Error::BadDER, |input| {
+        let not_before = try!(der::time_choice(input));
+        let not_after = try!(der::time_choice(input));
+        Ok(Validity {
+           not_before: not_before,
+           not_after: not_after
+        })
+    })
 }
 
 enum Understood { Yes, No }

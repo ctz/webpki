@@ -20,43 +20,49 @@ mod common;
 
 use untrusted::Input;
 use webpki::*;
-
 use common::ALL_SIGALGS;
 
-/* Checks we can verify netflix's cert chain.  This is notable
- * because they're rooted at a Verisign v1 root. */
-#[test]
-pub fn netflix()
-{
-    let ee = include_bytes!("netflix/ee.der");
-    let inter = include_bytes!("netflix/inter.der");
-    let ca = include_bytes!("netflix/ca.der");
+static EE_CERT: &'static [u8] = include_bytes!("expiry/ee.der");
+static EE_LONG_CERT: &'static [u8] = include_bytes!("expiry/eelong.der");
+
+pub fn expect_expiry(when: i64, ee: &'static [u8], expect_err: Option<Error>) {
+    let ca = include_bytes!("expiry/ca.der");
 
     let ee_input = Input::from(ee);
-    let inter_vec = vec![ Input::from(inter) ];
+    let inter_vec = vec![];
     let anchors = vec![
         trust_anchor_util::cert_der_as_trust_anchor(
             Input::from(ca)
         ).unwrap()
     ];
 
-    let cert = webpki::EndEntityCert::from(ee_input).unwrap();
-    cert.verify_is_valid_tls_server_cert(ALL_SIGALGS, &anchors, &inter_vec,
-                                         time::get_time()) .unwrap();
+    let rough_time = time::Timespec::new(when, 0);
+
+    let cert = EndEntityCert::from(ee_input).unwrap();
+    let rc = cert.verify_is_valid_tls_server_cert(ALL_SIGALGS,
+                                                  &anchors,
+                                                  &inter_vec,
+                                                  rough_time);
+
+    assert_eq!(expect_err, rc.err());
 }
 
 #[test]
-fn read_root_with_zero_serial() {
-    let ca = include_bytes!("misc/serial_zero.der");
-    trust_anchor_util::cert_der_as_trust_anchor(
-        Input::from(ca)
-    ).expect("godaddy cert should parse as anchor");
+pub fn valid() {
+    expect_expiry(1479496432, EE_CERT, None);
 }
 
 #[test]
-fn read_root_with_neg_serial() {
-    let ca = include_bytes!("misc/serial_neg.der");
-    trust_anchor_util::cert_der_as_trust_anchor(
-        Input::from(ca)
-    ).expect("idcat cert should parse as anchor");
+pub fn expired_ee_before() {
+    expect_expiry(1476644886, EE_CERT, Some(Error::CertNotValidYet));
+}
+
+#[test]
+pub fn expired_ee_after() {
+    expect_expiry(1479496434, EE_CERT, Some(Error::CertExpired));
+}
+
+#[test]
+pub fn expired_ca_after() {
+    expect_expiry(1528571613, EE_LONG_CERT, Some(Error::UnknownIssuer));
 }

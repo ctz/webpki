@@ -15,7 +15,8 @@
 //! Utilities for efficiently embedding trust anchors in programs.
 
 use {Error, TrustAnchor};
-use cert::{certificate_serial_number, Cert, EndEntityOrCA, parse_cert_internal};
+use cert::{certificate_serial_number, Cert, EndEntityOrCA};
+use cert::{parse_cert_internal, parse_validity};
 use std;
 use super::der;
 use untrusted;
@@ -37,7 +38,7 @@ pub fn cert_der_as_trust_anchor<'a>(cert_der: untrusted::Input<'a>)
     // embedded name constraints in a v1 certificate.
     match parse_cert_internal(cert_der, EndEntityOrCA::EndEntity,
                               possibly_invalid_certificate_serial_number) {
-        Ok(cert) => Ok(trust_anchor_from_cert(cert)),
+        Ok(cert) => trust_anchor_from_cert(cert),
         Err(Error::BadDER) => parse_cert_v1(cert_der).or(Err(Error::BadDER)),
         Err(err) => Err(err),
     }
@@ -71,13 +72,16 @@ pub fn generate_code_for_trust_anchors(name: &str,
     decl + &value
 }
 
-fn trust_anchor_from_cert<'a>(cert: Cert<'a>) -> TrustAnchor<'a> {
-    TrustAnchor {
+fn trust_anchor_from_cert<'a>(cert: Cert<'a>) -> Result<TrustAnchor<'a>, Error> {
+    let validity = try!(parse_validity(&cert.validity));
+
+    Ok(TrustAnchor {
         subject: cert.subject.as_slice_less_safe(),
         spki: cert.spki.as_slice_less_safe(),
         name_constraints: cert.name_constraints
-                              .map(|nc| nc.as_slice_less_safe())
-    }
+                              .map(|nc| nc.as_slice_less_safe()),
+        not_after: validity.not_after.sec,
+    })
 }
 
 /// Parses a v1 certificate directly into a TrustAnchor.
@@ -93,18 +97,23 @@ fn parse_cert_v1<'a>(cert_der: untrusted::Input<'a>)
 
                 try!(skip(tbs, der::Tag::Sequence)); // signature.
                 try!(skip(tbs, der::Tag::Sequence)); // issuer.
-                try!(skip(tbs, der::Tag::Sequence)); // validity.
+
+                let validity =
+                    try!(der::expect_tag_and_get_value(tbs,
+                                                       der::Tag::Sequence));
                 let subject =
                     try!(der::expect_tag_and_get_value(tbs,
                                                        der::Tag::Sequence));
                 let spki =
                     try!(der::expect_tag_and_get_value(tbs,
                                                        der::Tag::Sequence));
+                let validity = try!(parse_validity(&validity));
 
                 Ok(TrustAnchor {
                     subject: subject.as_slice_less_safe(),
                     spki: spki.as_slice_less_safe(),
-                    name_constraints: None
+                    name_constraints: None,
+                    not_after: validity.not_after.sec,
                 })
             });
 

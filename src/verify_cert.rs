@@ -54,6 +54,10 @@ pub fn build_chain<'a>(required_eku_if_present: KeyPurposeId,
             return Err(Error::UnknownIssuer);
         }
 
+        if time.sec >= trust_anchor.not_after {
+            return Err(Error::CertExpired);
+        }
+
         let name_constraints =
             trust_anchor.name_constraints.map(untrusted::Input::from);
 
@@ -150,8 +154,8 @@ fn check_issuer_independent_properties<'a>(
     // See the comment in `remember_extensions` for why we don't check the
     // KeyUsage extension.
 
-    try!(cert.validity.read_all(Error::BadDER,
-                                |value| check_validity(value, time)));
+    try!(cert::parse_validity(&cert.validity)
+         .and_then(|validity| check_validity(&validity, time)));
     try!(untrusted::read_all_optional(
             cert.basic_constraints, Error::BadDER,
             |value| check_basic_constraints(value, used_as_ca, sub_ca_count)));
@@ -163,18 +167,15 @@ fn check_issuer_independent_properties<'a>(
 }
 
 // https://tools.ietf.org/html/rfc5280#section-4.1.2.5
-fn check_validity(input: &mut untrusted::Reader, time: time::Timespec)
+fn check_validity(validity: &cert::Validity, time: time::Timespec)
                   -> Result<(), Error> {
-    let not_before = try!(der::time_choice(input));
-    let not_after = try!(der::time_choice(input));
-
-    if not_before > not_after {
+    if validity.not_before > validity.not_after {
         return Err(Error::InvalidCertValidity);
     }
-    if time < not_before {
+    if time < validity.not_before {
         return Err(Error::CertNotValidYet);
     }
-    if time > not_after {
+    if time > validity.not_after {
         return Err(Error::CertExpired);
     }
 
