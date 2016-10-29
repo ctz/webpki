@@ -26,8 +26,7 @@ use common::ALL_SIGALGS;
 /* Checks we can verify netflix's cert chain.  This is notable
  * because they're rooted at a Verisign v1 root. */
 #[test]
-pub fn netflix()
-{
+pub fn netflix() {
     let ee = include_bytes!("netflix/ee.der");
     let inter = include_bytes!("netflix/inter.der");
     let ca = include_bytes!("netflix/ca.der");
