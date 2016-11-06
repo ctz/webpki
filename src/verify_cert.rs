@@ -21,7 +21,8 @@ pub fn build_chain<'a>(required_eku_if_present: KeyPurposeId,
                        supported_sig_algs: &[&SignatureAlgorithm],
                        trust_anchors: &'a [TrustAnchor],
                        intermediate_certs: &[untrusted::Input<'a>],
-                       cert: &Cert<'a>, time: time::Timespec,
+                       cert: &Cert<'a>, end_entity: &Cert<'a>,
+                       time: time::Timespec,
                        sub_ca_count: usize)
                        -> Result<(), Error> {
     let used_as_ca = used_as_ca(&cert.ee_or_ca);
@@ -72,6 +73,15 @@ pub fn build_chain<'a>(required_eku_if_present: KeyPurposeId,
 
         try!(check_signatures(supported_sig_algs, cert, trust_anchor_spki));
 
+        if let Some(policy) = trust_anchor.policy {
+            let validity = try!(cert::parse_validity(&end_entity.validity));
+            try!((policy)(end_entity.whole.as_slice_less_safe(),
+                          end_entity.subject.as_slice_less_safe(),
+                          end_entity.spki.as_slice_less_safe(),
+                          validity.not_before,
+                          validity.not_after));
+        }
+
         Ok(())
     }) {
         Ok(()) => {
@@ -113,7 +123,7 @@ pub fn build_chain<'a>(required_eku_if_present: KeyPurposeId,
         };
 
         build_chain(required_eku_if_present, supported_sig_algs, trust_anchors,
-                    intermediate_certs, &potential_issuer, time,
+                    intermediate_certs, &potential_issuer, end_entity, time,
                     next_sub_ca_count)
     })
 }

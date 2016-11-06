@@ -24,6 +24,7 @@ pub enum EndEntityOrCA<'a> {
 pub struct Cert<'a> {
     pub ee_or_ca: EndEntityOrCA<'a>,
 
+    pub whole: untrusted::Input<'a>,
     pub signed_data: signed_data::SignedData<'a>,
     pub issuer: untrusted::Input<'a>,
     pub validity: untrusted::Input<'a>,
@@ -84,6 +85,7 @@ pub fn parse_cert_internal<'a>(
         let mut cert: Cert<'a> = Cert {
             ee_or_ca: ee_or_ca,
 
+            whole: cert_der,
             signed_data: signed_data,
             issuer: issuer,
             validity: validity,

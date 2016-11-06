@@ -81,6 +81,7 @@ fn trust_anchor_from_cert<'a>(cert: Cert<'a>) -> Result<TrustAnchor<'a>, Error> 
         name_constraints: cert.name_constraints
                               .map(|nc| nc.as_slice_less_safe()),
         not_after: validity.not_after.sec,
+        policy: None
     })
 }
 
@@ -114,6 +115,7 @@ fn parse_cert_v1<'a>(cert_der: untrusted::Input<'a>)
                     spki: spki.as_slice_less_safe(),
                     name_constraints: None,
                     not_after: validity.not_after.sec,
+                    policy: None
                 })
             });
 

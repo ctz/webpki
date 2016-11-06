@@ -169,7 +169,8 @@ impl <'a> EndEntityCert<'a> {
             -> Result<(), Error> {
         verify_cert::build_chain(verify_cert::EKU_SERVER_AUTH,
                                  supported_sig_algs, trust_anchors,
-                                 intermediate_certs, &self.inner, time, 0)
+                                 intermediate_certs, &self.inner, &self.inner,
+                                 time, 0)
     }
 
     /// Verifies that the certificate is valid for the given DNS host name.
@@ -281,7 +282,21 @@ pub enum Error {
     /// The signature algorithm for a signature is not in the set of supported
     /// signature algorithms given.
     UnsupportedSignatureAlgorithm,
+
+    /// The certificate do not conform to the policy attached to the
+    /// selected trust anchor.  This error is not returned from any public
+    /// function, but can be used by policy functions to reject use of
+    /// a particular trust anchor.  (The top level call will then fail
+    /// with UnknownIssuer unless there's another suitable issuer.)
+    RejectedByPolicy,
 }
+
+/// A function expressing a policy applied to a trust anchor.
+pub type PolicyFunction = fn(cert_der: &[u8],
+                             subject: &[u8],
+                             spki: &[u8],
+                             not_before: time::Timespec,
+                             not_after: time::Timespec) -> Result<(), Error>;
 
 /// A trust anchor (a.k.a. root CA).
 ///
@@ -292,7 +307,6 @@ pub enum Error {
 /// essential elements of trust anchors. The `webpki::trust_anchor_util` module
 /// provides functions for converting X.509 certificates to to the minimized
 /// `TrustAnchor` representation, either at runtime or in a build script.
-#[derive(Debug)]
 pub struct TrustAnchor<'a> {
     /// The value of the `subject` field of the trust anchor.
     pub subject: &'a [u8],
@@ -306,5 +320,41 @@ pub struct TrustAnchor<'a> {
 
     /// The root's expiry in seconds since the epoch. The anchor
     /// is only considered when the validation time is before this value.
-    pub not_after: i64
+    pub not_after: i64,
+
+    /// A function which can apply a policy to use of this trust root.
+    /// The arguments passed to the function are from the end entity
+    /// certificate.
+    ///
+    /// This can implement policies such as:
+    ///
+    /// - Bounding notBefore dates in response to a misissuance event
+    ///   (eg. in the WoSign/Startcom incident).
+    /// - Applying name constraints not expressed in the certificate
+    ///   chain (say, if a root has issuance restricted to .cn names
+    ///   retrospectively).
+    /// - Applying validity duration bounds to EV roots.
+    /// - Whitelisting end-entity certificates after a misissuance event.
+    ///
+    /// Return `Some(Error)` to prevent certificate validation.
+    pub policy: Option<PolicyFunction>
+}
+
+use std::fmt;
+
+impl<'a> fmt::Debug for TrustAnchor<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        try!(write!(f, "TrustAnchor {{ "));
+        try!(write!(f, "subject: {:?}, ", self.subject));
+        try!(write!(f, "spki: {:?}, ", self.spki));
+        try!(write!(f, "name_constraints: {:?}, ", self.name_constraints));
+        try!(write!(f, "not_after: {:?}, ", self.not_after));
+
+        try!(match self.policy {
+            None => write!(f, "policy: None "),
+            Some(_) => write!(f, "policy: Some(<function type>) ")
+        });
+
+        write!(f, "}}")
+    }
 }
